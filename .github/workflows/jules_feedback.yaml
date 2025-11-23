@@ -1,0 +1,146 @@
+name: Send Feedback to Jules
+
+on:
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  send-feedback:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Check and Send Feedback
+        uses: actions/github-script@v7
+        env:
+          JULES_API_KEY: ${{ secrets.JULES_API_KEY }}
+          ORG_NAME: ${{ vars.ORG_NAME }}
+          FEEDBACK_TEAM_SLUG: ${{ vars.FEEDBACK_TEAM_SLUG }}
+        with:
+          # Use GITHUB_TOKEN which might have org read access depending on the organization settings
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const pr = context.payload.pull_request;
+            const review = context.payload.review;
+            const reviewer = context.payload.sender.login;
+            const prBody = pr.body || "";
+
+            // 1. Check if Jules PR
+            // Look for pattern: "PR created automatically by Jules for task [ID](url) started by @user"
+            const regex = /PR created automatically by Jules for task \[([0-9]+)\]\(.*\) started by @([\w-]+)/;
+            const match = prBody.match(regex);
+
+            if (!match) {
+              console.log("Not a Jules PR. Skipping.");
+              return;
+            }
+
+            const sessionId = match[1];
+            const starter = match[2];
+
+            console.log(`Jules Session ID: ${sessionId}`);
+            console.log(`Starter: ${starter}`);
+            console.log(`Reviewer: ${reviewer}`);
+
+            // 2. Check if Reviewer is Starter
+            if (reviewer === starter) {
+              console.log("Reviewer is the starter. Skipping.");
+              return;
+            }
+
+            // 3. Check Team Membership
+            const org = process.env.ORG_NAME;
+            const teamSlug = process.env.FEEDBACK_TEAM_SLUG;
+
+            if (!org || !teamSlug) {
+              console.log("ORG_NAME or FEEDBACK_TEAM_SLUG vars not set. Cannot check team membership.");
+              core.setFailed("Missing configuration for Team check (ORG_NAME, FEEDBACK_TEAM_SLUG).");
+              return;
+            }
+
+            try {
+              console.log(`Checking if ${reviewer} is in team ${org}/${teamSlug}...`);
+              // Requires 'read:org' scope or 'Members: Read' org permission.
+              // For GITHUB_TOKEN, this depends on the organization default permissions or if it's an internal repo.
+              const { data: membership } = await github.rest.teams.getMembershipForUserInOrg({
+                org: org,
+                team_slug: teamSlug,
+                username: reviewer,
+              });
+
+              if (membership.state !== 'active') {
+                console.log(`User ${reviewer} is not an active member. State: ${membership.state}`);
+                return;
+              }
+            } catch (error) {
+              if (error.status === 404) {
+                 console.log(`User ${reviewer} is not a member of the team.`);
+                 return;
+              }
+              console.log(`Error checking team membership: ${error.message}`);
+              // We fail here because the intent is to only allow team members.
+              core.setFailed(`Failed to check team membership: ${error.message}. Ensure the GITHUB_TOKEN has access to organization members (this may require a PAT with read:org scope if the default token permissions are insufficient).`);
+              return;
+            }
+
+            // 4. Gather Feedback
+            let feedback = "";
+            if (review.body) {
+              feedback += `Review Summary:\n${review.body}\n\n`;
+            }
+
+            // Fetch review comments (line comments) associated with this review
+            try {
+              const { data: comments } = await github.rest.pulls.listReviewComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: pr.number,
+                review_id: review.id
+              });
+
+              if (comments && comments.length > 0) {
+                feedback += "Line Comments:\n";
+                comments.forEach(c => {
+                   feedback += `File: ${c.path}:${c.original_line || c.line}\n`;
+                   feedback += `Comment: ${c.body}\n\n`;
+                });
+              }
+            } catch (err) {
+               console.log(`Warning: Failed to fetch review comments: ${err.message}`);
+            }
+
+            if (!feedback.trim()) {
+               console.log("No feedback content found (empty review body and no comments).");
+               return;
+            }
+
+            console.log("Sending feedback to Jules...");
+
+            const julesApiKey = process.env.JULES_API_KEY;
+            if (!julesApiKey) {
+               core.setFailed("JULES_API_KEY secret is not set.");
+               return;
+            }
+
+            const url = `https://jules.googleapis.com/v1alpha/sessions/${sessionId}:sendMessage`;
+            const payload = {
+               prompt: `Feedback from ${reviewer}:\n\n${feedback}`
+            };
+
+            const response = await fetch(url, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Goog-Api-Key': julesApiKey
+              },
+              body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+              const errorText = await response.text();
+              core.setFailed(`Jules API Error: ${response.status} ${response.statusText} - ${errorText}`);
+              return;
+            }
+
+            console.log("Feedback successfully sent to Jules.");

@@ -4,6 +4,10 @@
 
 This GitHub Action facilitates a feedback loop for [Jules](https://jules.google). It triggers when a pull request review is submitted. It checks if the review comes from an authorized user and if the PR was created by Jules. If these conditions are met, it sends the review summary and line comments back to the Jules session, allowing Jules to incorporate the feedback.
 
+This is not meant to be a fully-featured implementation for Jules to work with teams. It is just meant to unblock people and make it easier to collaborate with Jules as a group. More polished (non-github-action) work coming in the future.
+
+**Note:** it *only* propagates review submissions, not any random comments. So you have to go to the code tab of the PR and hit "Submit review".
+
 ## Prerequisites
 
 Before using this action, you must have:
@@ -38,13 +42,13 @@ jobs:
       pull-requests: read
     steps:
       - name: Send Feedback
-        uses: BeksOmega/jules-comms@v1.0.0 # Replace with the actual repository name and version
+        uses: BeksOmega/jules-comms@v1.0.0
         with:
           jules_api_key: ${{ secrets.JULES_API_KEY }}
           feedback_users: "octocat,monalisa"
 ```
 
-**Note:** This action ignores reviews from the user who started the Jules task, preventing feedback loops from the bot itself or the initiator if they review their own PR (which is rare but possible).
+**Note:** This action ignores reviews from the user who started the Jules task, because those are already automatically propagated by the Jules github app.
 
 ## Attribution
 

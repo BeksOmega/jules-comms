@@ -2,7 +2,7 @@ name: Send Feedback to Jules
 description: 'Checks if a PR review is from an allowed user and sends the feedback to Jules.'
 branding:
   icon: 'message-square'
-  color: 'blue'
+  color: 'purple'
 
 inputs:
   jules_api_key:

@@ -38,7 +38,7 @@ jobs:
       pull-requests: read
     steps:
       - name: Send Feedback
-        uses: user/repo-name@main # Replace with the actual repository name and version
+        uses: BeksOmega/jules-comms@v1.0.0 # Replace with the actual repository name and version
         with:
           jules_api_key: ${{ secrets.JULES_API_KEY }}
           feedback_users: "octocat,monalisa"
